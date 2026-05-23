@@ -1,70 +1,44 @@
+import 'package:pdf/widgets.dart' hide Document;
+
 import '../core/database_helper.dart';
 import '../models/folder_model.dart';
 import '../models/document_model.dart';
 import '../models/page_model.dart';
 
 class DocumentRepository {
+  final DatabaseHelper _dbHelper = DatabaseHelper.instance;
 
-  Future<void> createFolder(String name) async {
-    final db = await DatabaseHelper.database;
+  Future<List<Folder>> getFolders() => _dbHelper.getAllFolders();
 
-    await db.insert(
-      'folders',
-      Folder(
-        name: name,
-        createdAt: DateTime.now(),
-      ).toMap(),
-    );
+  Future<int> createFolder(String name) {
+    final folder = Folder(name: name, createdAt: DateTime.now());
+    return _dbHelper.insertFolder(folder);
   }
 
-  Future<List<Folder>> getFolders() async {
-    final db = await DatabaseHelper.database;
+  Future<List<Document>> getRecentDocuments() => _dbHelper.getRecentDocuments();
 
-    final result = await db.query(
-      'folders',
-      orderBy: 'createdAt DESC',
+  Future<List<Document>> getDocumentsInFolder(int folderId) =>
+      _dbHelper.getDocumentsByFolder(folderId);
+
+  Future<int> createDocument(int folderId, String name) {
+    final doc = Document(
+      folderId: folderId,
+      name: name,
+      createdAt: DateTime.now(),
     );
-
-    return result.map((e) => Folder.fromMap(e)).toList();
+    return _dbHelper.insertDocument(doc);
   }
 
-  Future<void> createDocument({
-    required int folderId,
-    required String name,
-  }) async {
+  Future<int> addPage(PageModel page) => _dbHelper.insertPage(page);
 
-    final db = await DatabaseHelper.database;
+  Future<List<PageModel>> getPages(int documentId) =>
+      _dbHelper.getPagesByDocument(documentId);
 
-    await db.insert(
-      'documents',
-      DocumentModel(
-        folderId: folderId,
-        name: name,
-        createdAt: DateTime.now(),
-      ).toMap(),
-    );
-  }
+  Future<int> deleteDocument(int id) => _dbHelper.deleteDocument(id);
 
-  Future<List<DocumentModel>> getDocuments() async {
-    final db = await DatabaseHelper.database;
+  Future<int> deleteFolder(int id) => _dbHelper.deleteFolder(id);
 
-    final result = await db.query(
-      'documents',
-      orderBy: 'createdAt DESC',
-    );
+  Future<int> updatePage(PageModel page) => _dbHelper.updatePage(page);
 
-    return result
-        .map((e) => DocumentModel.fromMap(e))
-        .toList();
-  }
-
-  Future<void> deleteDocument(int id) async {
-    final db = await DatabaseHelper.database;
-
-    await db.delete(
-      'documents',
-      where: 'id = ?',
-      whereArgs: [id],
-    );
-  }
+  Future<int> deletePage(int id) => _dbHelper.deletePage(id);
 }

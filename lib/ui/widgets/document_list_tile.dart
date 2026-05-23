@@ -1,95 +1,70 @@
 import 'package:flutter/material.dart';
-import '../screens/document_detail_screen.dart';
+import 'package:intl/intl.dart';
+import '../../models/document_model.dart';
 
 class DocumentListTile extends StatelessWidget {
-  final String documentName;
-  final String date;
+  final Document doc;
+  final VoidCallback onTap;
   final VoidCallback onDelete;
 
   const DocumentListTile({
     super.key,
-    required this.documentName,
-    required this.date,
+    required this.doc,
+    required this.onTap,
     required this.onDelete,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.symmetric(
-        horizontal: 20,
-        vertical: 8,
+    return Dismissible(
+      key: Key('doc_${doc.id}'),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        decoration: BoxDecoration(
+          color: Colors.red.shade400,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: const Icon(Icons.delete_outline, color: Colors.white),
       ),
-
-      padding: const EdgeInsets.all(16),
-
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-
-      child: Row(
-        children: [
-
-          Container(
-            height: 52,
-            width: 52,
-
+      onDismissed: (_) => onDelete(),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: ListTile(
+          onTap: onTap,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          leading: Container(
+            height: 48,
+            width: 48,
             decoration: BoxDecoration(
-              color: Colors.deepPurple.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(14),
+              color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.5),
+              borderRadius: BorderRadius.circular(10),
             ),
-
-            child: const Icon(
-              Icons.description_outlined,
-              color: Colors.deepPurple,
-            ),
+            child: Icon(Icons.description_outlined, color: Theme.of(context).colorScheme.primary),
           ),
-
-          const SizedBox(width: 14),
-
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-
-                Text(
-                  documentName,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
-                ),
-
-                const SizedBox(height: 6),
-
-                Text(
-                  date,
-                  style: const TextStyle(
-                    color: Colors.grey,
-                    fontSize: 13,
-                  ),
-                ),
-              ],
-            ),
+          title: Text(
+            doc.name,
+            style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black, fontSize: 15),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
-
-          IconButton(
-            onPressed: onDelete,
-            icon: const Icon(
-              Icons.delete_outline,
-              color: Colors.red,
-            ),
+          subtitle: Text(
+            DateFormat.yMMMd().format(doc.createdAt),
+            style: const TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.w600),
           ),
-        ],
+          trailing: const Icon(Icons.chevron_right, color: Colors.black26),
+        ),
       ),
     );
   }

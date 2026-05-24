@@ -1,14 +1,23 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:open_filex/open_filex.dart';
 import '../../models/document_model.dart';
 import '../../models/page_model.dart';
 import '../../repositories/document_repository.dart';
 import '../../services/pdf_service.dart';
-import 'studio_screen.dart';
 import '../../services/scanner_service.dart';
+import '../../core/folio_theme.dart';
+import '../widgets/neu_widgets.dart';
+import 'studio_screen.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+
+
+bool _isSharing = false;
+bool _isOpeningPdf = false;
 
 class DocumentDetailScreen extends StatefulWidget {
   final Document document;
@@ -27,6 +36,7 @@ class DocumentDetailScreen extends StatefulWidget {
 class _DocumentDetailScreenState extends State<DocumentDetailScreen> {
   final PdfService _pdfService = PdfService();
   bool _isReorderMode = false;
+  bool _isExtracting = false;
   List<PageModel>? _pages;
 
   @override
@@ -37,120 +47,501 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> {
 
   Future<void> _loadPages() async {
     final pages = await widget.repository.getPages(widget.document.id!);
-    if (mounted) {
-      setState(() {
-        _pages = pages;
-      });
+    if (mounted) setState(() => _pages = pages);
+  }
+
+  // ─── OCR Text Extraction ──────────────────────────────────────────────────
+  Future<void> _extractText() async {
+    if (_pages == null || _pages!.isEmpty) return;
+    setState(() => _isExtracting = true);
+
+    try {
+      final scannerService = context.read<ScannerService>();
+      final buffer = StringBuffer();
+      for (int i = 0; i < _pages!.length; i++) {
+        final text = await scannerService.extractTextFromImage(File(_pages![i].imagePath));
+        if (text.isNotEmpty) {
+          buffer.writeln('─── Page ${i + 1} ───');
+          buffer.writeln(text);
+          buffer.writeln();
+        }
+      }
+      final result = buffer.toString().trim();
+      if (mounted) {
+        setState(() => _isExtracting = false);
+        _showExtractedText(result.isEmpty ? 'No text found in this document.' : result);
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isExtracting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('OCR error: $e')),
+        );
+      }
     }
   }
 
+  void _showExtractedText(String text) {
+    final theme = context.read<FolioThemeNotifier>();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.65,
+        maxChildSize: 0.95,
+        minChildSize: 0.4,
+        builder: (_, controller) => Container(
+          decoration: BoxDecoration(
+            color: theme.bg,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+            boxShadow: [
+              BoxShadow(
+                color: theme.darkShadow.withValues(alpha: 0.4),
+                blurRadius: 24,
+                offset: const Offset(0, -6),
+              ),
+            ],
+          ),
+          child: Column(
+            children: [
+              // Handle
+              Center(
+                child: Container(
+                  margin: const EdgeInsets.only(top: 12, bottom: 16),
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: theme.textSub.withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              // Title row
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Row(
+                  children: [
+                    Icon(Icons.text_fields_rounded, color: theme.accent, size: 22),
+                    const SizedBox(width: 10),
+                    Text(
+                      'Extracted Text',
+                      style: GoogleFonts.nunito(
+                        color: theme.text,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 18,
+                      ),
+                    ),
+                    const Spacer(),
+                    // Copy button
+                    NeuButton(
+                      borderRadius: 12,
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      onTap: () {
+                        Clipboard.setData(ClipboardData(text: text));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Copied to clipboard')),
+                        );
+                      },
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.copy_rounded, color: theme.accent, size: 16),
+                          const SizedBox(width: 6),
+                          Text('Copy', style: GoogleFonts.nunito(color: theme.accent, fontWeight: FontWeight.w800, fontSize: 13)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              // Text content
+              Expanded(
+                child: SingleChildScrollView(
+                  controller: controller,
+                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
+                  child: NeuBox(
+                    pressed: true,
+                    borderRadius: 16,
+                    padding: const EdgeInsets.all(16),
+                    child: SelectableText(
+                      text,
+                      style: GoogleFonts.nunito(
+                        color: theme.text,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        height: 1.7,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _exportAndShare() async {
+    if (_pages == null || _pages!.isEmpty) return;
+    setState(() => _isSharing = true);
     try {
-      if (_pages == null || _pages!.isEmpty) return;
-      if (!mounted) return;
-
       final images = _pages!.map((p) => File(p.imagePath)).toList();
-
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => const Center(child: CircularProgressIndicator()),
-      );
-
       final pdfFile = await _pdfService.generatePdf(images, widget.document.name);
-
       if (!mounted) return;
-      Navigator.pop(context); // Close loading
-
-      final result = await Share.shareXFiles([XFile(pdfFile.path)], text: 'Check out this document from Folio');
-
-      if (result.status == ShareResultStatus.success && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Shared successfully!')),
-        );
-      }
+      await Share.shareXFiles([XFile(pdfFile.path)], text: 'Document from Folio');
     } catch (e) {
-      if (!mounted) return;
-      Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
-      );
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+    } finally {
+      if (mounted) setState(() => _isSharing = false);
+    }
+  }
+
+  Future<void> _openPdf() async {
+    if (_pages == null || _pages!.isEmpty) return;
+    setState(() => _isOpeningPdf = true);
+    try {
+      final images = _pages!.map((p) => File(p.imagePath)).toList();
+      final pdfFile = await _pdfService.generatePdf(images, widget.document.name);
+      await OpenFilex.open(pdfFile.path);
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+    } finally {
+      if (mounted) setState(() => _isOpeningPdf = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = context.watch<FolioThemeNotifier>();
+
     return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        title: Text(widget.document.name),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
-        elevation: 0,
-        actions: [
-          IconButton(
-            icon: Icon(_isReorderMode ? Icons.grid_view : Icons.reorder),
-            onPressed: () => setState(() => _isReorderMode = !_isReorderMode),
-          ),
-          IconButton(
-            icon: const Icon(Icons.share_outlined),
-            onPressed: _exportAndShare,
-          ),
-          IconButton(
-            icon: const Icon(Icons.picture_as_pdf_outlined),
-            onPressed: () async {
-              if (_pages == null) return;
-              final images = _pages!.map((p) => File(p.imagePath)).toList();
-              final pdfFile = await _pdfService.generatePdf(images, widget.document.name);
-              await OpenFilex.open(pdfFile.path);
-            },
-          ),
-        ],
+      backgroundColor: theme.bg,
+      body: SafeArea(
+        child: Column(
+          children: [
+            // ─── Header ────────────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+              child: Row(
+                children: [
+                  NeuIconButton(
+                    icon: Icons.arrow_back_ios_new_rounded,
+                    onTap: () => Navigator.pop(context),
+                    size: 44,
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Text(
+                      widget.document.name,
+                      style: GoogleFonts.nunito(
+                        color: theme.text,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -0.5,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // ─── Action Row ────────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 16, 24, 16),
+              child: Row(
+                children: [
+                  NeuIconButton(
+                    icon: _isReorderMode ? Icons.grid_view_rounded : Icons.reorder_rounded,
+                    onTap: () => setState(() => _isReorderMode = !_isReorderMode),
+                    active: _isReorderMode,
+                    tooltip: _isReorderMode ? 'Grid View' : 'Reorder',
+                    size: 44,
+                  ),
+                  const SizedBox(width: 10),
+                  NeuIconButton(
+                    icon: Icons.share_outlined,
+                    onTap: _exportAndShare,
+                    size: 44,
+                    tooltip: 'Share PDF',
+                  ),
+                  const SizedBox(width: 10),
+                  NeuIconButton(
+                    icon: Icons.picture_as_pdf_outlined,
+                    onTap: () async {
+                      if (_pages == null) return;
+                      final images = _pages!.map((p) => File(p.imagePath)).toList();
+                      final pdfFile = await _pdfService.generatePdf(images, widget.document.name);
+                      await OpenFilex.open(pdfFile.path);
+                    },
+                    size: 44,
+                    tooltip: 'Open PDF',
+                  ),
+                  const SizedBox(width: 10),
+                  // OCR button
+                  _isExtracting
+                      ? SizedBox(
+                    width: 44,
+                    height: 44,
+                    child: Center(
+                      child: SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: theme.accent),
+                      ),
+                    ),
+                  )
+                      : NeuIconButton(
+                    icon: Icons.text_fields_rounded,
+                    onTap: _extractText,
+                    size: 44,
+                    tooltip: 'Extract Text (OCR)',
+                  ),
+                  const Spacer(),
+                  // Add pages button
+                  NeuButton(
+                    filled: true,
+                    borderRadius: 14,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    onTap: () => _addPages(context),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.add_a_photo_outlined, color: Colors.white, size: 16),
+                        const SizedBox(width: 6),
+                        Text('Add', style: GoogleFonts.nunito(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // ─── Pages ────────────────────────────────────────────────────
+            Expanded(
+              child: _pages == null
+                  ? const Center(child: CircularProgressIndicator())
+                  : _pages!.isEmpty
+                  ? Center(
+                child: Text(
+                  'No pages found.',
+                  style: TextStyle(color: theme.textSub, fontWeight: FontWeight.w700),
+                ),
+              )
+                  : _isReorderMode
+                  ? _buildReorderableList(theme)
+                  : _buildGrid(theme),
+            ),
+          ],
+        ),
       ),
-      body: _pages == null
-          ? const Center(child: CircularProgressIndicator())
-          : _pages!.isEmpty
-          ? const Center(child: Text('No pages found.'))
-          : _isReorderMode
-          ? _buildReorderableList()
-          : _buildGrid(),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _addPages(context),
-        child: const Icon(Icons.add_a_photo_outlined),
+    );
+  }
+
+  Widget _buildGrid(FolioThemeNotifier theme) {
+    return GridView.builder(
+      padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+      physics: const BouncingScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 14,
+        mainAxisSpacing: 14,
+        childAspectRatio: 0.7,
       ),
+      itemCount: _pages!.length,
+      itemBuilder: (context, index) {
+        final page = _pages![index];
+        return Hero(
+          tag: 'page_${page.id}',
+          child: Container(
+            decoration: BoxDecoration(
+              color: theme.bg,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: theme.raisedShadow,
+            ),
+            child: Stack(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: Image.file(
+                    File(page.imagePath),
+                    fit: BoxFit.cover,
+                    width: double.infinity,
+                    height: double.infinity,
+                  ),
+                ),
+                // Top action buttons
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: Row(
+                    children: [
+                      _PageActionButton(
+                        icon: Icons.edit_outlined,
+                        onTap: () async {
+                          final editedImage = await Navigator.push<File>(
+                            context,
+                            MaterialPageRoute(builder: (_) => StudioScreen(image: File(page.imagePath))),
+                          );
+                          if (editedImage != null) {
+                            await widget.repository.updatePage(page.copyWith(imagePath: editedImage.path));
+                            _loadPages();
+                          }
+                        },
+                      ),
+                      const SizedBox(width: 6),
+                      _PageActionButton(
+                        icon: Icons.delete_outline_rounded,
+                        danger: true,
+                        onTap: () async {
+                          await widget.repository.deletePage(page.id!);
+                          _loadPages();
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                // Page badge
+                Positioned(
+                  bottom: 8,
+                  left: 8,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.55),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      'Page ${index + 1}',
+                      style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildReorderableList(FolioThemeNotifier theme) {
+    return ReorderableListView.builder(
+      padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+      physics: const BouncingScrollPhysics(),
+      itemCount: _pages!.length,
+      onReorder: (oldIndex, newIndex) async {
+        setState(() {
+          if (oldIndex < newIndex) newIndex -= 1;
+          final item = _pages!.removeAt(oldIndex);
+          _pages!.insert(newIndex, item);
+        });
+        for (int i = 0; i < _pages!.length; i++) {
+          await widget.repository.updatePage(_pages![i].copyWith(pageOrder: i));
+        }
+      },
+      itemBuilder: (context, index) {
+        final page = _pages![index];
+        return Padding(
+          key: ValueKey(page.id),
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Container(
+            decoration: BoxDecoration(
+              color: theme.bg,
+              borderRadius: BorderRadius.circular(18),
+              boxShadow: theme.subtleShadow,
+            ),
+            child: ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              leading: ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Image.file(File(page.imagePath), width: 52, height: 52, fit: BoxFit.cover),
+              ),
+              title: Text(
+                'Page ${index + 1}',
+                style: GoogleFonts.nunito(color: theme.text, fontWeight: FontWeight.w800),
+              ),
+              trailing: Icon(Icons.drag_handle_rounded, color: theme.textSub),
+            ),
+          ),
+        );
+      },
     );
   }
 
   Future<void> _addPages(BuildContext context) async {
     final scannerService = context.read<ScannerService>();
+    final theme = context.read<FolioThemeNotifier>();
 
     final source = await showModalBottomSheet<String>(
       context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Padding(
-            padding: EdgeInsets.all(16.0),
-            child: Text('Add More Pages', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: BoxDecoration(
+          color: theme.bg,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                margin: const EdgeInsets.only(top: 12),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(color: theme.textSub.withValues(alpha: 0.3), borderRadius: BorderRadius.circular(2)),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(20),
+                child: Text('Add More Pages', style: GoogleFonts.nunito(color: theme.text, fontWeight: FontWeight.w900, fontSize: 18)),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: NeuButton(
+                        borderRadius: 18,
+                        padding: const EdgeInsets.all(20),
+                        onTap: () => Navigator.pop(ctx, 'camera'),
+                        child: Column(
+                          children: [
+                            Icon(Icons.camera_alt_outlined, color: theme.accent, size: 28),
+                            const SizedBox(height: 8),
+                            Text('Camera', style: GoogleFonts.nunito(color: theme.text, fontWeight: FontWeight.w700)),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: NeuButton(
+                        borderRadius: 18,
+                        padding: const EdgeInsets.all(20),
+                        onTap: () => Navigator.pop(ctx, 'gallery'),
+                        child: Column(
+                          children: [
+                            Icon(Icons.photo_library_outlined, color: theme.accent, size: 28),
+                            const SizedBox(height: 8),
+                            Text('Gallery', style: GoogleFonts.nunito(color: theme.text, fontWeight: FontWeight.w700)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-          ListTile(
-            leading: const Icon(Icons.camera_alt_outlined),
-            title: const Text('Camera'),
-            onTap: () => Navigator.pop(ctx, 'camera'),
-          ),
-          ListTile(
-            leading: const Icon(Icons.photo_library_outlined),
-            title: const Text('Gallery'),
-            onTap: () => Navigator.pop(ctx, 'gallery'),
-          ),
-          const SizedBox(height: 20),
-        ],
+        ),
       ),
     );
 
     if (source == null) return;
-
     List<File> newImages = [];
     if (source == 'camera') {
       final img = await scannerService.pickImageFromCamera();
@@ -162,12 +553,7 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> {
     if (newImages.isEmpty) return;
     if (!context.mounted) return;
 
-    // Show loading
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => const Center(child: CircularProgressIndicator()),
-    );
+    showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
 
     try {
       final startOrder = _pages?.length ?? 0;
@@ -179,165 +565,41 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> {
           pageOrder: startOrder + i,
         ));
       }
-
-      if (context.mounted) Navigator.pop(context); // Close loading
-      _loadPages(); // Refresh list
+      if (context.mounted) Navigator.pop(context);
+      _loadPages();
     } catch (e) {
       if (context.mounted) {
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error adding pages: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     }
   }
+}
 
-  Widget _buildGrid() {
-    return GridView.builder(
-      padding: const EdgeInsets.all(16),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        childAspectRatio: 0.7,
+// ─── Helper Widget ────────────────────────────────────────────────────────────
+class _PageActionButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool danger;
+
+  const _PageActionButton({required this.icon, required this.onTap, this.danger = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          color: danger ? Colors.redAccent : Colors.white,
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 6, offset: const Offset(0, 2)),
+          ],
+        ),
+        child: Icon(icon, size: 16, color: danger ? Colors.white : Colors.black87),
       ),
-      itemCount: _pages!.length,
-      itemBuilder: (context, index) {
-        final page = _pages![index];
-        return Hero(
-          tag: 'page_${page.id}',
-          child: Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.1),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                )
-              ],
-            ),
-            child: Stack(
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: Image.file(
-                    File(page.imagePath),
-                    fit: BoxFit.cover,
-                    width: double.infinity,
-                    height: double.infinity,
-                  ),
-                ),
-                Positioned(
-                  top: 8,
-                  right: 8,
-                  child: Row(
-                    children: [
-                      GestureDetector(
-                        onTap: () async {
-                          final File? editedImage = await Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => StudioScreen(image: File(page.imagePath)),
-                            ),
-                          );
-                          if (editedImage != null) {
-                            final updatedPage = page.copyWith(imagePath: editedImage.path);
-                            await widget.repository.updatePage(updatedPage);
-                            _loadPages();
-                          }
-                        },
-                        child: const CircleAvatar(
-                          radius: 16,
-                          backgroundColor: Colors.white,
-                          child: Icon(Icons.edit_outlined, size: 18, color: Colors.black),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      GestureDetector(
-                        onTap: () async {
-                          await widget.repository.deletePage(page.id!);
-                          _loadPages();
-                        },
-                        child: CircleAvatar(
-                          radius: 16,
-                          backgroundColor: Colors.red.shade400,
-                          child: const Icon(Icons.delete_outline, size: 18, color: Colors.white),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Positioned(
-                  bottom: 8,
-                  left: 8,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.black54,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      'Page ${index + 1}',
-                      style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildReorderableList() {
-    return ReorderableListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: _pages!.length,
-      onReorder: (oldIndex, newIndex) async {
-        setState(() {
-          if (oldIndex < newIndex) {
-            newIndex -= 1;
-          }
-          final PageModel item = _pages!.removeAt(oldIndex);
-          _pages!.insert(newIndex, item);
-        });
-        // Update order in DB
-        for (int i = 0; i < _pages!.length; i++) {
-          final updatedPage = _pages![i].copyWith(pageOrder: i);
-          await widget.repository.updatePage(updatedPage);
-        }
-      },
-      itemBuilder: (context, index) {
-        final page = _pages![index];
-        return Padding(
-          key: ValueKey(page.id),
-          padding: const EdgeInsets.only(bottom: 12.0),
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.05),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                )
-              ],
-            ),
-            child: ListTile(
-              leading: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Image.file(File(page.imagePath), width: 50, height: 50, fit: BoxFit.cover),
-              ),
-              title: Text(
-                'Page ${index + 1}',
-                style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black),
-              ),
-              trailing: const Icon(Icons.drag_handle, color: Colors.black),
-            ),
-          ),
-        );
-      },
     );
   }
 }

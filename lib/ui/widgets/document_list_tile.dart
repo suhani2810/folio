@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import '../../models/document_model.dart';
+import '../../core/folio_theme.dart';
 
 class DocumentListTile extends StatelessWidget {
   final Document doc;
@@ -16,55 +19,103 @@ class DocumentListTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = context.watch<FolioThemeNotifier>();
+
     return Dismissible(
       key: Key('doc_${doc.id}'),
       direction: DismissDirection.endToStart,
       background: Container(
         alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 20),
+        padding: const EdgeInsets.only(right: 24),
         decoration: BoxDecoration(
-          color: Colors.red.shade400,
-          borderRadius: BorderRadius.circular(16),
+          color: Colors.redAccent.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(20),
         ),
-        child: const Icon(Icons.delete_outline, color: Colors.white),
+        child: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 26),
       ),
+      confirmDismiss: (_) => _confirmDelete(context, theme),
       onDismissed: (_) => onDelete(),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          decoration: BoxDecoration(
+            color: theme.bg,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: theme.raisedShadow,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: Row(
+              children: [
+                // Icon container
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: theme.accentSoft,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(Icons.description_rounded, color: theme.accent, size: 24),
+                ),
+                const SizedBox(width: 14),
+                // Text
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        doc.name,
+                        style: GoogleFonts.nunito(
+                          color: theme.text,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        DateFormat.yMMMd().format(doc.createdAt),
+                        style: GoogleFonts.nunito(
+                          color: theme.textSub,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                // Arrow
+                Icon(Icons.chevron_right_rounded, color: theme.textSub, size: 22),
+              ],
             ),
-          ],
+          ),
         ),
-        child: ListTile(
-          onTap: onTap,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          leading: Container(
-            height: 48,
-            width: 48,
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.5),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(Icons.description_outlined, color: Theme.of(context).colorScheme.primary),
-          ),
-          title: Text(
-            doc.name,
-            style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black, fontSize: 15),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          subtitle: Text(
-            DateFormat.yMMMd().format(doc.createdAt),
-            style: const TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.w600),
-          ),
-          trailing: const Icon(Icons.chevron_right, color: Colors.black26),
+      ),
+    );
+  }
+
+  Future<bool?> _confirmDelete(BuildContext context, FolioThemeNotifier theme) {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: theme.bg,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: Text('Delete Document?', style: TextStyle(color: theme.text, fontWeight: FontWeight.w900)),
+        content: Text(
+          'Delete "${doc.name}"? This cannot be undone.',
+          style: TextStyle(color: theme.textSub, fontWeight: FontWeight.w600),
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: TextStyle(color: theme.textSub, fontWeight: FontWeight.w700)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w800)),
+          ),
+        ],
       ),
     );
   }

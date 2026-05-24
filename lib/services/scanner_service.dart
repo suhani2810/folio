@@ -26,28 +26,45 @@ class ScannerService {
       await folioDir.create(recursive: true);
     }
 
-    final String fileName = 'IMG_${DateTime.now().millisecondsSinceEpoch}${p.extension(image.path)}';
+    final String fileName =
+        'IMG_${DateTime.now().millisecondsSinceEpoch}${p.extension(image.path)}';
     final File permanentImage = await image.copy(p.join(folioDir.path, fileName));
     return permanentImage;
   }
 
+  /// Smart document name based on detected content keywords.
   Future<String> getSmartName(File image) async {
     final inputImage = InputImage.fromFile(image);
-    final RecognizedText recognizedText = await _textRecognizer.processImage(inputImage);
+    final RecognizedText recognizedText =
+    await _textRecognizer.processImage(inputImage);
 
-    String text = recognizedText.text.toLowerCase();
+    final text = recognizedText.text.toLowerCase();
 
-    // Simple logic for smart naming as per vision
     if (text.contains('invoice') || text.contains('bill')) {
       if (text.contains('amazon')) return 'Amazon_Invoice';
       if (text.contains('google')) return 'Google_Bill';
       return 'Invoice';
     }
-
     if (text.contains('passport')) return 'Passport_Scan';
-    if (text.contains('id card')) return 'ID_Card';
+    if (text.contains('id card') || text.contains('identification')) return 'ID_Card';
+    if (text.contains('receipt')) return 'Receipt';
+    if (text.contains('contract') || text.contains('agreement')) return 'Contract';
+    if (text.contains('certificate')) return 'Certificate';
 
     return 'New_Document';
+  }
+
+  /// Full OCR text extraction from a single image file.
+  /// Returns recognized text, or empty string if nothing found.
+  Future<String> extractTextFromImage(File image) async {
+    try {
+      final inputImage = InputImage.fromFile(image);
+      final RecognizedText recognizedText =
+      await _textRecognizer.processImage(inputImage);
+      return recognizedText.text.trim();
+    } catch (e) {
+      return '';
+    }
   }
 
   void dispose() {

@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 import 'blocs/dashboard/dashboard_bloc.dart';
 import 'blocs/dashboard/dashboard_event.dart';
 import 'blocs/scanner/scanner_bloc.dart';
 import 'repositories/document_repository.dart';
 import 'services/scanner_service.dart';
 import 'ui/screens/dashboard_screen.dart';
+import 'core/folio_theme.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -18,53 +19,37 @@ class FolioApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MultiRepositoryProvider(
+    final repository   = DocumentRepository();
+    final scannerSvc   = ScannerService();
+    final themeNotifier = FolioThemeNotifier();   // ← NEW
+
+    return MultiProvider(
       providers: [
-        RepositoryProvider(create: (context) => DocumentRepository()),
-        RepositoryProvider(create: (context) => ScannerService()),
+        ChangeNotifierProvider<FolioThemeNotifier>.value(value: themeNotifier),
+
+        Provider<ScannerService>.value(value: scannerSvc),
+        Provider<DocumentRepository>.value(value: repository),
       ],
       child: MultiBlocProvider(
         providers: [
           BlocProvider(
-            create: (context) => DashboardBloc(
-              repository: context.read<DocumentRepository>(),
-            )..add(LoadDashboard()),
+            create: (_) => DashboardBloc(repository: repository)
+              ..add(LoadDashboard()),
           ),
           BlocProvider(
-            create: (context) => ScannerBloc(
-              repository: context.read<DocumentRepository>(),
-              scannerService: context.read<ScannerService>(),
+            create: (_) => ScannerBloc(
+              scannerService: scannerSvc,
+              repository: repository,
             ),
           ),
         ],
-        child: MaterialApp(
-          title: 'Folio',
-          debugShowCheckedModeBanner: false,
-          theme: ThemeData(
-            useMaterial3: true,
-            colorScheme: ColorScheme.fromSeed(
-              seedColor: const Color(0xFF673AB7),
-              primary: const Color(0xFF673AB7),
-              secondary: const Color(0xFFFF5722),
-              surface: Colors.white,
-              brightness: Brightness.light,
-            ),
-            textTheme: GoogleFonts.poppinsTextTheme(),
-            appBarTheme: const AppBarTheme(
-              backgroundColor: Colors.white,
-              elevation: 0,
-              centerTitle: true,
-            ),
+        child: Consumer<FolioThemeNotifier>(
+          builder: (context, theme, _) => MaterialApp(
+            title: 'Folio',
+            debugShowCheckedModeBanner: false,
+            theme: theme.themeData,          // auto-switches day ↔ night
+            home: const DashboardScreen(),
           ),
-          darkTheme: ThemeData(
-            useMaterial3: true,
-            colorScheme: ColorScheme.fromSeed(
-              seedColor: Colors.deepPurple,
-              brightness: Brightness.dark,
-            ),
-            textTheme: GoogleFonts.poppinsTextTheme(ThemeData.dark().textTheme),
-          ),
-          home: const DashboardScreen(),
         ),
       ),
     );

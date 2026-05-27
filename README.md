@@ -14,12 +14,6 @@ platforms (Web, Mobile, and Desktop) with a single codebase.
   - 📁 Project Showcase: Interactive cards to display your GitHub repositories
     and live projects.
 
-📸 Screenshots
-
-| Desktop Version                                                                  | Mobile Version                                                                  |
-| :------------------------------------------------------------------------------: | :-----------------------------------------------------------------------------: |
-| <img src="https://via.placeholder.com/600x400?text=Desktop+Preview" width="400"> | <img src="https://via.placeholder.com/200x400?text=Mobile+Preview" width="150"> |
-
 🛠️ Tech Stack
 
   - Framework: Flutter
